@@ -6,7 +6,11 @@ import pytest
 import tempfile
 import os
 
-from app.database.db import init_db, get_session, UserCRUD, SalaryCRUD, User
+from app.database.db import (
+    init_db, get_session, UserCRUD, SalaryCRUD, WeatherCRUD, User,
+    SalaryRecord, WeatherRecord
+)
+from sqlalchemy.exc import SQLAlchemyError
 
 
 @pytest.fixture
@@ -114,6 +118,108 @@ def test_salary_crud_create(temp_db):
     assert record.user_id == user.id
     assert record.base_salary == 1000.0
     assert record.net == 156600.0
+    
+    session.close()
+
+
+def test_db_repeated_init(temp_db):
+    """Тест, что повторная инициализация не ломает БД."""
+    # Первая инициализация уже выполнена в фикстуре
+    # Создаём пользователя
+    session1 = get_session()
+    user1 = UserCRUD.get_or_create(session1, telegram_id=11111, first_name="Test1")
+    session1.close()
+    
+    # Повторная инициализация
+    init_db(temp_db)
+    
+    # Проверяем, что данные сохранились
+    session2 = get_session()
+    user2 = UserCRUD.get_by_telegram_id(session2, telegram_id=11111)
+    assert user2 is not None
+    assert user2.first_name == "Test1"
+    session2.close()
+
+
+def test_db_connection(temp_db):
+    """Тест подключения к БД."""
+    session = get_session()
+    assert session is not None
+    
+    # Проверяем, что можем выполнить запрос
+    from sqlalchemy import text
+    result = session.execute(text("SELECT 1"))
+    assert result.scalar() == 1
+    
+    session.close()
+
+
+def test_tables_exist(temp_db):
+    """Тест, что все таблицы созданы."""
+    session = get_session()
+    from sqlalchemy import inspect
+    
+    inspector = inspect(session.bind)
+    tables = inspector.get_table_names()
+    
+    assert "users" in tables
+    assert "salary_records" in tables
+    assert "weather_records" in tables
+    
+    session.close()
+
+
+def test_user_crud_error_handling(temp_db):
+    """Тест обработки ошибок в CRUD операциях."""
+    session = get_session()
+    
+    # Попытка создать пользователя с дублирующимся telegram_id
+    UserCRUD.get_or_create(session, telegram_id=22222, first_name="Test")
+    
+    # Вторая попытка с тем же ID должна вернуть существующего пользователя
+    user2 = UserCRUD.get_or_create(session, telegram_id=22222, first_name="Test2")
+    assert user2.first_name == "Test2"  # Данные обновятся
+    
+    session.close()
+
+
+def test_salary_crud_get_records(temp_db):
+    """Тест получения записей о зарплате."""
+    session = get_session()
+    
+    # Создаём пользователя
+    user = UserCRUD.get_or_create(session, telegram_id=33333)
+    
+    # Создаём несколько записей
+    SalaryCRUD.create(session, user.id, 1000.0, 160.0, 0.0, 160000.0, 20800.0, 139200.0)
+    SalaryCRUD.create(session, user.id, 1000.0, 160.0, 20000.0, 180000.0, 23400.0, 156600.0)
+    
+    # Получаем записи
+    records = SalaryCRUD.get_user_records(session, user.id, limit=5)
+    assert len(records) == 2
+    assert records[0].net == 156600.0  # Последняя запись первая
+    
+    session.close()
+
+
+def test_weather_crud_create(temp_db):
+    """Тест создания записи о погоде."""
+    session = get_session()
+    
+    # Создаём пользователя
+    user = UserCRUD.get_or_create(session, telegram_id=44444)
+    
+    # Создаём запись о погоде
+    record = WeatherCRUD.create(
+        session,
+        user_id=user.id,
+        city="Москва",
+        weather_data='{"temp": 20, "description": "ясно"}'
+    )
+    
+    assert record.user_id == user.id
+    assert record.city == "Москва"
+    assert "temp" in record.weather_data
     
     session.close()
 

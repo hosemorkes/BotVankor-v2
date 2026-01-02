@@ -6,8 +6,9 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Float, Text
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Float, Text, event
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -77,42 +78,70 @@ class UserCRUD:
         
         Returns:
             Объект User (существующий или новый)
-        """
-        user = session.query(User).filter_by(telegram_id=telegram_id).first()
-        if not user:
-            # Создаём нового пользователя
-            user = User(
-                telegram_id=telegram_id,
-                username=username,
-                first_name=first_name,
-                last_name=last_name
-            )
-            session.add(user)
-            session.commit()
-            logger.info(f"Создан новый пользователь в БД: telegram_id={telegram_id}")
-        else:
-            # Обновляем данные существующего пользователя (если изменились)
-            updated = False
-            if user.username != username:
-                user.username = username
-                updated = True
-            if user.first_name != first_name:
-                user.first_name = first_name
-                updated = True
-            if user.last_name != last_name:
-                user.last_name = last_name
-                updated = True
-            
-            if updated:
-                session.commit()
-                logger.debug(f"Обновлены данные пользователя: telegram_id={telegram_id}")
         
-        return user
+        Raises:
+            SQLAlchemyError: При ошибках работы с БД
+        """
+        try:
+            user = session.query(User).filter_by(telegram_id=telegram_id).first()
+            if not user:
+                # Создаём нового пользователя
+                user = User(
+                    telegram_id=telegram_id,
+                    username=username,
+                    first_name=first_name,
+                    last_name=last_name
+                )
+                session.add(user)
+                session.commit()
+                logger.info(f"Создан новый пользователь в БД: telegram_id={telegram_id}")
+            else:
+                # Обновляем данные существующего пользователя (если изменились)
+                updated = False
+                if user.username != username:
+                    user.username = username
+                    updated = True
+                if user.first_name != first_name:
+                    user.first_name = first_name
+                    updated = True
+                if user.last_name != last_name:
+                    user.last_name = last_name
+                    updated = True
+                
+                if updated:
+                    session.commit()
+                    logger.debug(f"Обновлены данные пользователя: telegram_id={telegram_id}")
+            
+            return user
+        except IntegrityError as e:
+            session.rollback()
+            logger.error(f"Ошибка целостности БД при создании пользователя telegram_id={telegram_id}: {e}")
+            raise
+        except SQLAlchemyError as e:
+            session.rollback()
+            logger.error(f"Ошибка БД при работе с пользователем telegram_id={telegram_id}: {e}")
+            raise
     
     @staticmethod
     def get_by_telegram_id(session: Session, telegram_id: int) -> Optional[User]:
-        """Получить пользователя по Telegram ID."""
-        return session.query(User).filter_by(telegram_id=telegram_id).first()
+        """
+        Получить пользователя по Telegram ID.
+        
+        Args:
+            session: Сессия БД
+            telegram_id: Telegram ID пользователя
+        
+        Returns:
+            Объект User или None если не найден
+        
+        Raises:
+            SQLAlchemyError: При ошибках работы с БД
+        """
+        try:
+            return session.query(User).filter_by(telegram_id=telegram_id).first()
+        except SQLAlchemyError as e:
+            logger.error(f"Ошибка БД при получении пользователя telegram_id={telegram_id}: {e}")
+            raise
 
 
 class SalaryCRUD:
@@ -121,25 +150,66 @@ class SalaryCRUD:
     @staticmethod
     def create(session: Session, user_id: int, base_salary: float, hours_worked: float,
               bonus: float, gross: float, tax: float, net: float) -> SalaryRecord:
-        """Создать запись о зарплате."""
-        record = SalaryRecord(
-            user_id=user_id,
-            base_salary=base_salary,
-            hours_worked=hours_worked,
-            bonus=bonus,
-            gross=gross,
-            tax=tax,
-            net=net
-        )
-        session.add(record)
-        session.commit()
-        return record
+        """
+        Создать запись о зарплате.
+        
+        Args:
+            session: Сессия БД
+            user_id: ID пользователя
+            base_salary: Базовая ставка
+            hours_worked: Отработанные часы
+            bonus: Бонус
+            gross: Оклад до налогов
+            tax: Налог
+            net: К выплате
+        
+        Returns:
+            Объект SalaryRecord
+        
+        Raises:
+            SQLAlchemyError: При ошибках работы с БД
+        """
+        try:
+            record = SalaryRecord(
+                user_id=user_id,
+                base_salary=base_salary,
+                hours_worked=hours_worked,
+                bonus=bonus,
+                gross=gross,
+                tax=tax,
+                net=net
+            )
+            session.add(record)
+            session.commit()
+            logger.debug(f"Создана запись о зарплате для user_id={user_id}")
+            return record
+        except SQLAlchemyError as e:
+            session.rollback()
+            logger.error(f"Ошибка БД при создании записи о зарплате user_id={user_id}: {e}")
+            raise
     
     @staticmethod
     def get_user_records(session: Session, user_id: int, limit: int = 10) -> list[SalaryRecord]:
-        """Получить последние записи пользователя."""
-        return session.query(SalaryRecord).filter_by(user_id=user_id)\
-            .order_by(SalaryRecord.created_at.desc()).limit(limit).all()
+        """
+        Получить последние записи пользователя.
+        
+        Args:
+            session: Сессия БД
+            user_id: ID пользователя
+            limit: Максимальное количество записей
+        
+        Returns:
+            Список записей SalaryRecord
+        
+        Raises:
+            SQLAlchemyError: При ошибках работы с БД
+        """
+        try:
+            return session.query(SalaryRecord).filter_by(user_id=user_id)\
+                .order_by(SalaryRecord.created_at.desc()).limit(limit).all()
+        except SQLAlchemyError as e:
+            logger.error(f"Ошибка БД при получении записей о зарплате user_id={user_id}: {e}")
+            raise
 
 
 class WeatherCRUD:
@@ -147,15 +217,35 @@ class WeatherCRUD:
     
     @staticmethod
     def create(session: Session, user_id: int, city: str, weather_data: str) -> WeatherRecord:
-        """Создать запись о запросе погоды."""
-        record = WeatherRecord(
-            user_id=user_id,
-            city=city,
-            weather_data=weather_data
-        )
-        session.add(record)
-        session.commit()
-        return record
+        """
+        Создать запись о запросе погоды.
+        
+        Args:
+            session: Сессия БД
+            user_id: ID пользователя
+            city: Название города
+            weather_data: JSON строка с данными о погоде
+        
+        Returns:
+            Объект WeatherRecord
+        
+        Raises:
+            SQLAlchemyError: При ошибках работы с БД
+        """
+        try:
+            record = WeatherRecord(
+                user_id=user_id,
+                city=city,
+                weather_data=weather_data
+            )
+            session.add(record)
+            session.commit()
+            logger.debug(f"Создана запись о погоде для user_id={user_id}, city={city}")
+            return record
+        except SQLAlchemyError as e:
+            session.rollback()
+            logger.error(f"Ошибка БД при создании записи о погоде user_id={user_id}: {e}")
+            raise
 
 
 # Инициализация базы данных
@@ -167,21 +257,62 @@ def init_db(db_path: str) -> None:
     """
     Инициализирует базу данных и создаёт таблицы.
     
+    Безопасно для повторных вызовов - не пересоздаёт существующие таблицы.
+    
     Args:
         db_path: Путь к файлу базы данных
+    
+    Raises:
+        RuntimeError: При ошибках инициализации БД
     """
     global _engine, _SessionLocal
     
-    # Создаём директорию для БД если её нет
-    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    
-    # Создаём движок SQLAlchemy
-    _engine = create_engine(f"sqlite:///{db_path}", echo=False)
-    _SessionLocal = sessionmaker(bind=_engine)
-    
-    # Создаём таблицы
-    Base.metadata.create_all(_engine)
-    logger.info(f"База данных инициализирована: {db_path}")
+    try:
+        # Создаём директорию для БД если её нет
+        db_path_obj = Path(db_path)
+        db_path_obj.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Создаём движок SQLAlchemy с настройками для надёжности
+        # check_same_thread=False нужен для работы в разных потоках
+        # pool_pre_ping=True проверяет соединение перед использованием
+        _engine = create_engine(
+            f"sqlite:///{db_path}",
+            echo=False,
+            connect_args={"check_same_thread": False},
+            pool_pre_ping=True
+        )
+        
+        # Проверяем подключение
+        from sqlalchemy import text
+        with _engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        
+        _SessionLocal = sessionmaker(bind=_engine)
+        
+        # Создаём таблицы (безопасно для повторных вызовов)
+        Base.metadata.create_all(_engine, checkfirst=True)
+        
+        logger.info(f"База данных инициализирована: {db_path}")
+        
+        # Проверяем целостность БД
+        _check_db_integrity()
+        
+    except Exception as e:
+        logger.error(f"Ошибка инициализации БД {db_path}: {e}")
+        raise RuntimeError(f"Не удалось инициализировать БД: {e}") from e
+
+
+def _check_db_integrity() -> None:
+    """Проверяет целостность базы данных."""
+    try:
+        from sqlalchemy import text
+        session = get_session()
+        # Простая проверка - пытаемся выполнить запрос
+        session.execute(text("SELECT 1"))
+        session.close()
+        logger.debug("Проверка целостности БД пройдена")
+    except Exception as e:
+        logger.warning(f"Предупреждение при проверке целостности БД: {e}")
 
 
 def get_session() -> Session:
