@@ -24,3 +24,21 @@ def get_reply_keyboard() -> ReplyKeyboardMarkup:
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
+
+def get_salary_skip_keyboard() -> InlineKeyboardMarkup:
+    """Возвращает клавиатуру с кнопкой 'Пропустить' для диалога зарплаты."""
+    keyboard = [
+        [InlineKeyboardButton("⏭️ Пропустить", callback_data="skip")],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_salary_confirm_keyboard() -> InlineKeyboardMarkup:
+    """Возвращает клавиатуру подтверждения для диалога зарплаты."""
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Рассчитать", callback_data="confirm"),
+            InlineKeyboardButton("❌ Отмена", callback_data="cancel"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)

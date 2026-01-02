@@ -105,14 +105,16 @@ def test_salary_crud_create(temp_db):
     
     # Создаём запись о зарплате
     record = SalaryCRUD.create(
-        session,
+        session=session,
         user_id=user.id,
         base_salary=1000.0,
         hours_worked=160.0,
-        bonus=20000.0,
         gross=160000.0,
+        gross_with_coefficient=160000.0,
+        total=180000.0,
         tax=23400.0,
-        net=156600.0
+        net=156600.0,
+        bonus=20000.0
     )
     
     assert record.user_id == user.id
@@ -191,8 +193,30 @@ def test_salary_crud_get_records(temp_db):
     user = UserCRUD.get_or_create(session, telegram_id=33333)
     
     # Создаём несколько записей
-    SalaryCRUD.create(session, user.id, 1000.0, 160.0, 0.0, 160000.0, 20800.0, 139200.0)
-    SalaryCRUD.create(session, user.id, 1000.0, 160.0, 20000.0, 180000.0, 23400.0, 156600.0)
+    SalaryCRUD.create(
+        session=session,
+        user_id=user.id,
+        base_salary=1000.0,
+        hours_worked=160.0,
+        gross=160000.0,
+        gross_with_coefficient=160000.0,
+        total=160000.0,
+        tax=20800.0,
+        net=139200.0,
+        bonus=0.0
+    )
+    SalaryCRUD.create(
+        session=session,
+        user_id=user.id,
+        base_salary=1000.0,
+        hours_worked=160.0,
+        gross=160000.0,
+        gross_with_coefficient=160000.0,
+        total=180000.0,
+        tax=23400.0,
+        net=156600.0,
+        bonus=20000.0
+    )
     
     # Получаем записи
     records = SalaryCRUD.get_user_records(session, user.id, limit=5)

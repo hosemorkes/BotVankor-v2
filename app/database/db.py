@@ -38,8 +38,15 @@ class SalaryRecord(Base):
     user_id = Column(Integer, nullable=False, index=True)
     base_salary = Column(Float, nullable=False)
     hours_worked = Column(Float, nullable=False)
+    district_coefficient = Column(Float, default=1.0)
+    northern_allowance_rate = Column(Float, default=0.0)
+    overtime_hours = Column(Float, default=0.0)
     bonus = Column(Float, default=0.0)
     gross = Column(Float, nullable=False)
+    gross_with_coefficient = Column(Float, nullable=False)
+    northern_allowance = Column(Float, default=0.0)
+    overtime_pay = Column(Float, default=0.0)
+    total = Column(Float, nullable=False)
     tax = Column(Float, nullable=False)
     net = Column(Float, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -148,8 +155,23 @@ class SalaryCRUD:
     """CRUD операции для записей о зарплате."""
     
     @staticmethod
-    def create(session: Session, user_id: int, base_salary: float, hours_worked: float,
-              bonus: float, gross: float, tax: float, net: float) -> SalaryRecord:
+    def create(
+        session: Session,
+        user_id: int,
+        base_salary: float,
+        hours_worked: float,
+        gross: float,
+        gross_with_coefficient: float,
+        total: float,
+        tax: float,
+        net: float,
+        district_coefficient: float = 1.0,
+        northern_allowance_rate: float = 0.0,
+        northern_allowance: float = 0.0,
+        overtime_hours: float = 0.0,
+        overtime_pay: float = 0.0,
+        bonus: float = 0.0
+    ) -> SalaryRecord:
         """
         Создать запись о зарплате.
         
@@ -158,10 +180,17 @@ class SalaryCRUD:
             user_id: ID пользователя
             base_salary: Базовая ставка
             hours_worked: Отработанные часы
-            bonus: Бонус
-            gross: Оклад до налогов
+            gross: Оклад до коэффициентов
+            gross_with_coefficient: Оклад с районным коэффициентом
+            total: Итого до налогов
             tax: Налог
             net: К выплате
+            district_coefficient: Районный коэффициент
+            northern_allowance_rate: Процент северной надбавки
+            northern_allowance: Сумма северной надбавки
+            overtime_hours: Переработанные часы
+            overtime_pay: Оплата за переработки
+            bonus: Бонус
         
         Returns:
             Объект SalaryRecord
@@ -174,8 +203,15 @@ class SalaryCRUD:
                 user_id=user_id,
                 base_salary=base_salary,
                 hours_worked=hours_worked,
+                district_coefficient=district_coefficient,
+                northern_allowance_rate=northern_allowance_rate,
+                northern_allowance=northern_allowance,
+                overtime_hours=overtime_hours,
+                overtime_pay=overtime_pay,
                 bonus=bonus,
                 gross=gross,
+                gross_with_coefficient=gross_with_coefficient,
+                total=total,
                 tax=tax,
                 net=net
             )
@@ -292,6 +328,9 @@ def init_db(db_path: str) -> None:
         # Создаём таблицы (безопасно для повторных вызовов)
         Base.metadata.create_all(_engine, checkfirst=True)
         
+        # Выполняем миграции для обновления существующих таблиц
+        _migrate_salary_records_table()
+        
         logger.info(f"База данных инициализирована: {db_path}")
         
         # Проверяем целостность БД
@@ -300,6 +339,83 @@ def init_db(db_path: str) -> None:
     except Exception as e:
         logger.error(f"Ошибка инициализации БД {db_path}: {e}")
         raise RuntimeError(f"Не удалось инициализировать БД: {e}") from e
+
+
+def _migrate_salary_records_table() -> None:
+    """
+    Миграция таблицы salary_records для добавления новых колонок.
+    
+    Добавляет колонки, если они отсутствуют:
+    - district_coefficient
+    - northern_allowance_rate
+    - overtime_hours
+    - gross_with_coefficient
+    - northern_allowance
+    - overtime_pay
+    - total
+    """
+    try:
+        from sqlalchemy import text, inspect
+        
+        inspector = inspect(_engine)
+        
+        # Проверяем, существует ли таблица
+        if "salary_records" not in inspector.get_table_names():
+            logger.debug("Таблица salary_records не существует, будет создана автоматически")
+            return
+        
+        # Получаем список существующих колонок
+        existing_columns = [col["name"] for col in inspector.get_columns("salary_records")]
+        
+        # Колонки для добавления с их типами и значениями по умолчанию
+        columns_to_add = {
+            "district_coefficient": ("FLOAT", "1.0"),
+            "northern_allowance_rate": ("FLOAT", "0.0"),
+            "overtime_hours": ("FLOAT", "0.0"),
+            "gross_with_coefficient": ("FLOAT", None),  # Без значения по умолчанию, но nullable
+            "northern_allowance": ("FLOAT", "0.0"),
+            "overtime_pay": ("FLOAT", "0.0"),
+            "total": ("FLOAT", None),  # Без значения по умолчанию, но nullable
+        }
+        
+        with _engine.begin() as conn:
+            for column_name, (column_type, default_value) in columns_to_add.items():
+                if column_name not in existing_columns:
+                    try:
+                        # SQLite поддерживает ADD COLUMN с DEFAULT
+                        if default_value is not None:
+                            # Для колонок с default значением
+                            alter_sql = f"ALTER TABLE salary_records ADD COLUMN {column_name} {column_type} DEFAULT {default_value}"
+                        else:
+                            # Для колонок без default (gross_with_coefficient) - добавляем как nullable
+                            alter_sql = f"ALTER TABLE salary_records ADD COLUMN {column_name} {column_type}"
+                        
+                        conn.execute(text(alter_sql))
+                        
+                        # Если это gross_with_coefficient или total, заполняем их значениями
+                        if column_name == "gross_with_coefficient":
+                            update_sql = text("UPDATE salary_records SET gross_with_coefficient = gross WHERE gross_with_coefficient IS NULL")
+                            conn.execute(update_sql)
+                        elif column_name == "total":
+                            # Для total вычисляем: gross + bonus (старая логика) или gross_with_coefficient + northern_allowance + overtime_pay + bonus
+                            # Используем более полную формулу, если есть gross_with_coefficient
+                            update_sql = text("""
+                                UPDATE salary_records 
+                                SET total = COALESCE(
+                                    gross_with_coefficient + COALESCE(northern_allowance, 0) + COALESCE(overtime_pay, 0) + COALESCE(bonus, 0),
+                                    gross + COALESCE(bonus, 0)
+                                )
+                                WHERE total IS NULL
+                            """)
+                            conn.execute(update_sql)
+                        
+                        logger.info(f"Добавлена колонка {column_name} в таблицу salary_records")
+                    except Exception as e:
+                        logger.warning(f"Не удалось добавить колонку {column_name}: {e}")
+                        # Продолжаем с другими колонками даже при ошибке
+        
+    except Exception as e:
+        logger.warning(f"Ошибка при миграции таблицы salary_records: {e}")
 
 
 def _check_db_integrity() -> None:
