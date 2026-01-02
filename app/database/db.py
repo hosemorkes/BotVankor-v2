@@ -7,9 +7,8 @@ from pathlib import Path
 from typing import Optional
 
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Float, Text
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
-from datetime import datetime
+from sqlalchemy.orm import declarative_base, sessionmaker, Session
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +25,8 @@ class User(Base):
     username = Column(String(100))
     first_name = Column(String(100))
     last_name = Column(String(100))
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 
 class SalaryRecord(Base):
@@ -42,7 +41,7 @@ class SalaryRecord(Base):
     gross = Column(Float, nullable=False)
     tax = Column(Float, nullable=False)
     net = Column(Float, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class WeatherRecord(Base):
@@ -53,7 +52,7 @@ class WeatherRecord(Base):
     user_id = Column(Integer, nullable=False, index=True)
     city = Column(String(100), nullable=False)
     weather_data = Column(Text)  # JSON строка с данными о погоде
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 # CRUD операции
@@ -63,9 +62,25 @@ class UserCRUD:
     @staticmethod
     def get_or_create(session: Session, telegram_id: int, username: Optional[str] = None,
                      first_name: Optional[str] = None, last_name: Optional[str] = None) -> User:
-        """Получить или создать пользователя."""
+        """
+        Получить или создать пользователя.
+        
+        Если пользователь существует, обновляет его данные (username, имя).
+        Если не существует - создаёт нового.
+        
+        Args:
+            session: Сессия БД
+            telegram_id: Telegram ID пользователя
+            username: Username пользователя (опционально)
+            first_name: Имя пользователя (опционально)
+            last_name: Фамилия пользователя (опционально)
+        
+        Returns:
+            Объект User (существующий или новый)
+        """
         user = session.query(User).filter_by(telegram_id=telegram_id).first()
         if not user:
+            # Создаём нового пользователя
             user = User(
                 telegram_id=telegram_id,
                 username=username,
@@ -74,7 +89,24 @@ class UserCRUD:
             )
             session.add(user)
             session.commit()
-            logger.info(f"Создан новый пользователь: {telegram_id}")
+            logger.info(f"Создан новый пользователь в БД: telegram_id={telegram_id}")
+        else:
+            # Обновляем данные существующего пользователя (если изменились)
+            updated = False
+            if user.username != username:
+                user.username = username
+                updated = True
+            if user.first_name != first_name:
+                user.first_name = first_name
+                updated = True
+            if user.last_name != last_name:
+                user.last_name = last_name
+                updated = True
+            
+            if updated:
+                session.commit()
+                logger.debug(f"Обновлены данные пользователя: telegram_id={telegram_id}")
+        
         return user
     
     @staticmethod

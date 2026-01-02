@@ -9,25 +9,66 @@ from telegram.ext import (
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
+    ContextTypes,
     filters,
 )
 
 from app.bot.telegram.keyboards import get_main_keyboard
+from app.database.db import get_session, UserCRUD
 
 logger = logging.getLogger(__name__)
 
 
-async def start_command(update: Update, context) -> None:
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработчик команды /start."""
     user = update.effective_user
-    await update.message.reply_text(
-        f"Привет, {user.first_name}! 👋\n\n"
-        "Я бот для работы с зарплатой и погодой.",
-        reply_markup=get_main_keyboard()
-    )
+    
+    # Получаем сессию БД
+    session = get_session()
+    try:
+        # Проверяем, существует ли пользователь
+        existing_user = UserCRUD.get_by_telegram_id(session, user.id)
+        is_new_user = existing_user is None
+        
+        # Создаём или получаем пользователя
+        db_user = UserCRUD.get_or_create(
+            session=session,
+            telegram_id=user.id,
+            username=user.username,
+            first_name=user.first_name,
+            last_name=user.last_name
+        )
+        
+        # Логируем вход пользователя
+        if is_new_user:
+            logger.info(
+                f"Новый пользователь зарегистрирован: "
+                f"telegram_id={user.id}, username={user.username}, "
+                f"first_name={user.first_name}"
+            )
+        else:
+            logger.info(
+                f"Пользователь вернулся: "
+                f"telegram_id={user.id}, username={user.username}, "
+                f"first_name={user.first_name}"
+            )
+        
+        # Формируем приветственное сообщение
+        greeting = f"Привет, {user.first_name or 'друг'}! 👋\n\n"
+        if is_new_user:
+            greeting += "Добро пожаловать! Я бот для работы с зарплатой и погодой."
+        else:
+            greeting += "С возвращением! Я бот для работы с зарплатой и погодой."
+        
+        await update.message.reply_text(
+            greeting,
+            reply_markup=get_main_keyboard()
+        )
+    finally:
+        session.close()
 
 
-async def help_command(update: Update, context) -> None:
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработчик команды /help."""
     help_text = """
 📋 Доступные команды:
@@ -39,7 +80,7 @@ async def help_command(update: Update, context) -> None:
     await update.message.reply_text(help_text)
 
 
-async def button_callback(update: Update, context) -> None:
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработчик нажатий на inline кнопки."""
     query = update.callback_query
     await query.answer()
@@ -56,7 +97,7 @@ async def button_callback(update: Update, context) -> None:
         await query.edit_message_text("Неизвестная команда")
 
 
-async def handle_message(update: Update, context) -> None:
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработчик текстовых сообщений."""
     text = update.message.text
     await update.message.reply_text(

@@ -53,3 +53,5 @@ logs/
 data/
 !data/.gitkeep
 
+# Временные файлы и хлам
+temp/

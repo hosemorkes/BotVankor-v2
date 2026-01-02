@@ -3,15 +3,17 @@
 Инициализация и запуск бота.
 """
 
-import asyncio
 import logging
 from pathlib import Path
 
-from telegram import Bot
+from dotenv import load_dotenv
 from telegram.ext import Application
 
 from app.bot.telegram.handlers import setup_handlers
 from app.database.db import init_db
+
+# Загрузка переменных окружения из .env файла
+load_dotenv()
 
 
 # Настройка логирования
@@ -22,7 +24,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def main() -> None:
+def main() -> None:
     """Основная функция запуска бота."""
     # Инициализация базы данных
     db_path = Path("data/bot.db")
@@ -43,9 +45,9 @@ async def main() -> None:
     
     # Запуск бота
     logger.info("Бот запущен")
-    await application.run_polling(allowed_updates=["message", "callback_query"])
+    application.run_polling(allowed_updates=["message", "callback_query"])
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
 

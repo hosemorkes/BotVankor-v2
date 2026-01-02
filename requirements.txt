@@ -1,8 +1,8 @@
 # Telegram Bot
-python-telegram-bot==20.7
+python-telegram-bot>=22.5
 
 # Database
-SQLAlchemy==2.0.23
+SQLAlchemy>=2.0.36
 
 # HTTP клиент для внешних API
 aiohttp>=3.10.0
