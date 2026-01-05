@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch, MagicMock
 from app.services.weather_service import (
     format_weather_report,
     get_weather,
+    WeatherCache,
     VANKOR_LATITUDE,
     VANKOR_LONGITUDE,
     VANKOR_NAME
@@ -73,10 +74,8 @@ def test_wind_direction():
 @pytest.mark.asyncio
 async def test_get_weather_success():
     """Тест успешного получения погоды."""
-    # Сбрасываем кэш
-    import app.services.weather_service as ws
-    ws._weather_cache = None
-    ws._cache_timestamp = 0
+    # Создаём новый экземпляр кэша для теста
+    test_cache = WeatherCache(cache_duration=0)  # Кэш сразу устаревает
     
     mock_response = {
         "main": {
@@ -102,7 +101,7 @@ async def test_get_weather_success():
         mock_get.return_value.__aenter__.return_value = mock_response_obj
         
         with patch.dict('os.environ', {'WEATHER_API_KEY': 'test_key'}):
-            result = await get_weather()
+            result = await get_weather(cache=test_cache)
             
             assert result is not None
             assert result["location"] == VANKOR_NAME
@@ -114,23 +113,19 @@ async def test_get_weather_success():
 @pytest.mark.asyncio
 async def test_get_weather_no_api_key():
     """Тест получения погоды без API ключа."""
-    # Сбрасываем кэш
-    import app.services.weather_service as ws
-    ws._weather_cache = None
-    ws._cache_timestamp = 0
+    # Создаём новый экземпляр кэша для теста
+    test_cache = WeatherCache(cache_duration=0)  # Кэш сразу устаревает
     
     with patch.dict('os.environ', {}, clear=True):
-        result = await get_weather()
+        result = await get_weather(cache=test_cache)
         assert result is None
 
 
 @pytest.mark.asyncio
 async def test_get_weather_api_error():
     """Тест обработки ошибки API."""
-    # Сбрасываем кэш
-    import app.services.weather_service as ws
-    ws._weather_cache = None
-    ws._cache_timestamp = 0
+    # Создаём новый экземпляр кэша для теста
+    test_cache = WeatherCache(cache_duration=0)  # Кэш сразу устаревает
     
     with patch('aiohttp.ClientSession.get') as mock_get:
         mock_response_obj = AsyncMock()
@@ -139,21 +134,19 @@ async def test_get_weather_api_error():
         mock_get.return_value.__aenter__.return_value = mock_response_obj
         
         with patch.dict('os.environ', {'WEATHER_API_KEY': 'test_key'}):
-            result = await get_weather()
+            result = await get_weather(cache=test_cache)
             assert result is None
 
 
 @pytest.mark.asyncio
 async def test_get_weather_network_error():
     """Тест обработки сетевой ошибки."""
-    # Сбрасываем кэш
-    import app.services.weather_service as ws
-    ws._weather_cache = None
-    ws._cache_timestamp = 0
+    # Создаём новый экземпляр кэша для теста
+    test_cache = WeatherCache(cache_duration=0)  # Кэш сразу устаревает
     
     with patch('aiohttp.ClientSession.get', side_effect=aiohttp.ClientError("Network error")):
         with patch.dict('os.environ', {'WEATHER_API_KEY': 'test_key'}):
-            result = await get_weather()
+            result = await get_weather(cache=test_cache)
             assert result is None
 
 
@@ -162,4 +155,38 @@ def test_vankor_coordinates():
     assert VANKOR_LATITUDE == 69.5
     assert VANKOR_LONGITUDE == 88.0
     assert VANKOR_NAME == "Ванкорское месторождение"
+
+
+def test_weather_cache():
+    """Тест класса WeatherCache."""
+    cache = WeatherCache(cache_duration=60)  # 60 секунд
+    
+    # Кэш пуст
+    assert cache.get() is None
+    assert cache.is_valid() is False
+    
+    # Сохраняем данные
+    test_data = {"temperature": 20, "description": "ясно"}
+    cache.set(test_data)
+    
+    # Проверяем, что данные есть
+    assert cache.get() == test_data
+    assert cache.is_valid() is True
+    
+    # Очищаем кэш
+    cache.clear()
+    assert cache.get() is None
+    assert cache.is_valid() is False
+
+
+def test_weather_cache_expiration():
+    """Тест истечения срока действия кэша."""
+    cache = WeatherCache(cache_duration=0)  # Кэш сразу устаревает
+    
+    test_data = {"temperature": 20}
+    cache.set(test_data)
+    
+    # Кэш должен быть пустым, так как duration=0
+    assert cache.get() is None
+    assert cache.is_valid() is False
 

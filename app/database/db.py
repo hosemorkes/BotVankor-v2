@@ -5,6 +5,7 @@ ORM-модели, CRUD операции и инициализация базы �
 import logging
 from pathlib import Path
 from typing import Optional
+from contextlib import contextmanager
 
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Float, Text, event
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
@@ -31,24 +32,30 @@ class User(Base):
 
 
 class SalaryRecord(Base):
-    """Модель записи о зарплате."""
+    """Модель записи о зарплате (вахтовый метод)."""
     __tablename__ = "salary_records"
     
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, nullable=False, index=True)
-    base_salary = Column(Float, nullable=False)
-    hours_worked = Column(Float, nullable=False)
-    district_coefficient = Column(Float, default=1.0)
-    northern_allowance_rate = Column(Float, default=0.0)
-    overtime_hours = Column(Float, default=0.0)
-    bonus = Column(Float, default=0.0)
-    gross = Column(Float, nullable=False)
-    gross_with_coefficient = Column(Float, nullable=False)
-    northern_allowance = Column(Float, default=0.0)
-    overtime_pay = Column(Float, default=0.0)
-    total = Column(Float, nullable=False)
-    tax = Column(Float, nullable=False)
-    net = Column(Float, nullable=False)
+    telegram_id = Column(Integer, nullable=False, index=True)
+    username = Column(String(100))
+    
+    # Входные параметры
+    hourly_rate = Column(Float, nullable=False)  # Часовая ставка
+    days_worked = Column(Float, nullable=False)  # Отработано дней
+    night_hours = Column(Float, default=0.0)  # Кол-во ночных смен
+    travel_days = Column(Float, default=0.0)  # Дни в пути
+    holiday_days = Column(Float, default=0.0)  # Кол-во праздников
+    idle_days = Column(Float, default=0.0)  # Кол-во дней простоя
+    additional_payments = Column(Float, default=0.0)  # Премии и прочие доплаты
+    
+    # Результаты расчёта
+    salary_by_position = Column(Float, nullable=False)  # Оплата по окладу
+    shift_method_payment = Column(Float, default=0.0)  # Доплата за вахтовый метод
+    monthly_bonus = Column(Float, default=0.0)  # Премия месячная (33%)
+    regional_allowance = Column(Float, default=0.0)  # Региональная надбавка
+    northern_allowance = Column(Float, default=0.0)  # Северная надбавка
+    net = Column(Float, nullable=False)  # ЗП к выплате
+    
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
@@ -157,40 +164,42 @@ class SalaryCRUD:
     @staticmethod
     def create(
         session: Session,
-        user_id: int,
-        base_salary: float,
-        hours_worked: float,
-        gross: float,
-        gross_with_coefficient: float,
-        total: float,
-        tax: float,
-        net: float,
-        district_coefficient: float = 1.0,
-        northern_allowance_rate: float = 0.0,
+        telegram_id: int,
+        username: Optional[str],
+        hourly_rate: float,
+        days_worked: float,
+        night_hours: float = 0.0,
+        travel_days: float = 0.0,
+        holiday_days: float = 0.0,
+        idle_days: float = 0.0,
+        additional_payments: float = 0.0,
+        salary_by_position: float = 0.0,
+        shift_method_payment: float = 0.0,
+        monthly_bonus: float = 0.0,
+        regional_allowance: float = 0.0,
         northern_allowance: float = 0.0,
-        overtime_hours: float = 0.0,
-        overtime_pay: float = 0.0,
-        bonus: float = 0.0
+        net: float = 0.0
     ) -> SalaryRecord:
         """
-        Создать запись о зарплате.
+        Создать запись о зарплате (вахтовый метод).
         
         Args:
             session: Сессия БД
-            user_id: ID пользователя
-            base_salary: Базовая ставка
-            hours_worked: Отработанные часы
-            gross: Оклад до коэффициентов
-            gross_with_coefficient: Оклад с районным коэффициентом
-            total: Итого до налогов
-            tax: Налог
-            net: К выплате
-            district_coefficient: Районный коэффициент
-            northern_allowance_rate: Процент северной надбавки
-            northern_allowance: Сумма северной надбавки
-            overtime_hours: Переработанные часы
-            overtime_pay: Оплата за переработки
-            bonus: Бонус
+            telegram_id: Telegram ID пользователя
+            username: Username пользователя
+            hourly_rate: Часовая ставка
+            days_worked: Отработано дней
+            night_hours: Кол-во ночных смен
+            travel_days: Дни в пути
+            holiday_days: Кол-во праздников
+            idle_days: Кол-во дней простоя
+            additional_payments: Премии и прочие доплаты
+            salary_by_position: Оплата по окладу
+            shift_method_payment: Доплата за вахтовый метод
+            monthly_bonus: Премия месячная (33%)
+            regional_allowance: Региональная надбавка
+            northern_allowance: Северная надбавка
+            net: ЗП к выплате
         
         Returns:
             Объект SalaryRecord
@@ -200,38 +209,39 @@ class SalaryCRUD:
         """
         try:
             record = SalaryRecord(
-                user_id=user_id,
-                base_salary=base_salary,
-                hours_worked=hours_worked,
-                district_coefficient=district_coefficient,
-                northern_allowance_rate=northern_allowance_rate,
+                telegram_id=telegram_id,
+                username=username,
+                hourly_rate=hourly_rate,
+                days_worked=days_worked,
+                night_hours=night_hours,
+                travel_days=travel_days,
+                holiday_days=holiday_days,
+                idle_days=idle_days,
+                additional_payments=additional_payments,
+                salary_by_position=salary_by_position,
+                shift_method_payment=shift_method_payment,
+                monthly_bonus=monthly_bonus,
+                regional_allowance=regional_allowance,
                 northern_allowance=northern_allowance,
-                overtime_hours=overtime_hours,
-                overtime_pay=overtime_pay,
-                bonus=bonus,
-                gross=gross,
-                gross_with_coefficient=gross_with_coefficient,
-                total=total,
-                tax=tax,
                 net=net
             )
             session.add(record)
             session.commit()
-            logger.debug(f"Создана запись о зарплате для user_id={user_id}")
+            logger.debug(f"Создана запись о зарплате для telegram_id={telegram_id}")
             return record
         except SQLAlchemyError as e:
             session.rollback()
-            logger.error(f"Ошибка БД при создании записи о зарплате user_id={user_id}: {e}")
+            logger.error(f"Ошибка БД при создании записи о зарплате telegram_id={telegram_id}: {e}")
             raise
     
     @staticmethod
-    def get_user_records(session: Session, user_id: int, limit: int = 10) -> list[SalaryRecord]:
+    def get_user_records(session: Session, telegram_id: int, limit: int = 10) -> list[SalaryRecord]:
         """
         Получить последние записи пользователя.
         
         Args:
             session: Сессия БД
-            user_id: ID пользователя
+            telegram_id: Telegram ID пользователя
             limit: Максимальное количество записей
         
         Returns:
@@ -241,10 +251,10 @@ class SalaryCRUD:
             SQLAlchemyError: При ошибках работы с БД
         """
         try:
-            return session.query(SalaryRecord).filter_by(user_id=user_id)\
+            return session.query(SalaryRecord).filter_by(telegram_id=telegram_id)\
                 .order_by(SalaryRecord.created_at.desc()).limit(limit).all()
         except SQLAlchemyError as e:
-            logger.error(f"Ошибка БД при получении записей о зарплате user_id={user_id}: {e}")
+            logger.error(f"Ошибка БД при получении записей о зарплате telegram_id={telegram_id}: {e}")
             raise
 
 
@@ -343,16 +353,14 @@ def init_db(db_path: str) -> None:
 
 def _migrate_salary_records_table() -> None:
     """
-    Миграция таблицы salary_records для добавления новых колонок.
+    Миграция таблицы salary_records - пересоздание с новой структурой.
     
-    Добавляет колонки, если они отсутствуют:
-    - district_coefficient
-    - northern_allowance_rate
-    - overtime_hours
-    - gross_with_coefficient
-    - northern_allowance
-    - overtime_pay
-    - total
+    Удаляет старую таблицу и создаёт новую с полями:
+    - telegram_id, username
+    - hourly_rate, days_worked
+    - night_hours, travel_days, holiday_days, idle_days, additional_payments
+    - salary_by_position, shift_method_payment, monthly_bonus
+    - regional_allowance, northern_allowance, net
     """
     try:
         from sqlalchemy import text, inspect
@@ -367,65 +375,71 @@ def _migrate_salary_records_table() -> None:
         # Получаем список существующих колонок
         existing_columns = [col["name"] for col in inspector.get_columns("salary_records")]
         
-        # Колонки для добавления с их типами и значениями по умолчанию
-        columns_to_add = {
-            "district_coefficient": ("FLOAT", "1.0"),
-            "northern_allowance_rate": ("FLOAT", "0.0"),
-            "overtime_hours": ("FLOAT", "0.0"),
-            "gross_with_coefficient": ("FLOAT", None),  # Без значения по умолчанию, но nullable
-            "northern_allowance": ("FLOAT", "0.0"),
-            "overtime_pay": ("FLOAT", "0.0"),
-            "total": ("FLOAT", None),  # Без значения по умолчанию, но nullable
+        # Проверяем, нужна ли миграция (если структура уже правильная)
+        required_columns = {
+            "telegram_id", "username", "hourly_rate", "days_worked",
+            "night_hours", "travel_days", "holiday_days", "idle_days", "additional_payments",
+            "salary_by_position", "shift_method_payment", "monthly_bonus",
+            "regional_allowance", "northern_allowance", "net"
         }
         
+        # Если структура уже правильная, не делаем миграцию
+        if required_columns.issubset(set(existing_columns)):
+            logger.debug("Таблица salary_records уже имеет правильную структуру")
+            return
+        
+        logger.info("Начинаем миграцию таблицы salary_records - пересоздание с новой структурой")
+        
         with _engine.begin() as conn:
-            for column_name, (column_type, default_value) in columns_to_add.items():
-                if column_name not in existing_columns:
-                    try:
-                        # SQLite поддерживает ADD COLUMN с DEFAULT
-                        if default_value is not None:
-                            # Для колонок с default значением
-                            alter_sql = f"ALTER TABLE salary_records ADD COLUMN {column_name} {column_type} DEFAULT {default_value}"
-                        else:
-                            # Для колонок без default (gross_with_coefficient) - добавляем как nullable
-                            alter_sql = f"ALTER TABLE salary_records ADD COLUMN {column_name} {column_type}"
-                        
-                        conn.execute(text(alter_sql))
-                        
-                        # Если это gross_with_coefficient или total, заполняем их значениями
-                        if column_name == "gross_with_coefficient":
-                            update_sql = text("UPDATE salary_records SET gross_with_coefficient = gross WHERE gross_with_coefficient IS NULL")
-                            conn.execute(update_sql)
-                        elif column_name == "total":
-                            # Для total вычисляем: gross + bonus (старая логика) или gross_with_coefficient + northern_allowance + overtime_pay + bonus
-                            # Используем более полную формулу, если есть gross_with_coefficient
-                            update_sql = text("""
-                                UPDATE salary_records 
-                                SET total = COALESCE(
-                                    gross_with_coefficient + COALESCE(northern_allowance, 0) + COALESCE(overtime_pay, 0) + COALESCE(bonus, 0),
-                                    gross + COALESCE(bonus, 0)
-                                )
-                                WHERE total IS NULL
-                            """)
-                            conn.execute(update_sql)
-                        
-                        logger.info(f"Добавлена колонка {column_name} в таблицу salary_records")
-                    except Exception as e:
-                        logger.warning(f"Не удалось добавить колонку {column_name}: {e}")
-                        # Продолжаем с другими колонками даже при ошибке
+            # Создаём временную таблицу с новой структурой
+            conn.execute(text("""
+                CREATE TABLE salary_records_new (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    telegram_id INTEGER NOT NULL,
+                    username VARCHAR(100),
+                    hourly_rate FLOAT NOT NULL,
+                    days_worked FLOAT NOT NULL,
+                    night_hours FLOAT DEFAULT 0.0,
+                    travel_days FLOAT DEFAULT 0.0,
+                    holiday_days FLOAT DEFAULT 0.0,
+                    idle_days FLOAT DEFAULT 0.0,
+                    additional_payments FLOAT DEFAULT 0.0,
+                    salary_by_position FLOAT NOT NULL,
+                    shift_method_payment FLOAT DEFAULT 0.0,
+                    monthly_bonus FLOAT DEFAULT 0.0,
+                    regional_allowance FLOAT DEFAULT 0.0,
+                    northern_allowance FLOAT DEFAULT 0.0,
+                    net FLOAT NOT NULL,
+                    created_at DATETIME
+                )
+            """))
+            
+            # Удаляем старую таблицу
+            conn.execute(text("DROP TABLE salary_records"))
+            
+            # Переименовываем новую таблицу
+            conn.execute(text("ALTER TABLE salary_records_new RENAME TO salary_records"))
+            
+            # Создаём индекс
+            try:
+                conn.execute(text("CREATE INDEX ix_salary_records_telegram_id ON salary_records (telegram_id)"))
+            except Exception:
+                pass  # Индекс может уже существовать
+            
+            logger.info("Таблица salary_records успешно пересоздана с новой структурой")
         
     except Exception as e:
-        logger.warning(f"Ошибка при миграции таблицы salary_records: {e}")
+        logger.error(f"Ошибка при миграции таблицы salary_records: {e}")
+        raise
 
 
 def _check_db_integrity() -> None:
     """Проверяет целостность базы данных."""
     try:
         from sqlalchemy import text
-        session = get_session()
-        # Простая проверка - пытаемся выполнить запрос
-        session.execute(text("SELECT 1"))
-        session.close()
+        with db_session() as session:
+            # Простая проверка - пытаемся выполнить запрос
+            session.execute(text("SELECT 1"))
         logger.debug("Проверка целостности БД пройдена")
     except Exception as e:
         logger.warning(f"Предупреждение при проверке целостности БД: {e}")
@@ -435,10 +449,45 @@ def get_session() -> Session:
     """
     Получить сессию базы данных.
     
+    ВНИМАНИЕ: Используйте db_session() контекстный менеджер вместо прямого вызова
+    для гарантированного закрытия сессии.
+    
     Returns:
         Сессия SQLAlchemy
     """
     if _SessionLocal is None:
         raise RuntimeError("База данных не инициализирована. Вызовите init_db() сначала.")
     return _SessionLocal()
+
+
+@contextmanager
+def db_session():
+    """
+    Контекстный менеджер для безопасной работы с сессией БД.
+    
+    Гарантирует закрытие сессии даже при возникновении исключений.
+    
+    Usage:
+        with db_session() as session:
+            user = UserCRUD.get_by_telegram_id(session, telegram_id=123)
+            # Сессия автоматически закроется при выходе из блока
+    
+    Yields:
+        Session: Сессия SQLAlchemy
+    
+    Raises:
+        RuntimeError: Если БД не инициализирована
+    """
+    if _SessionLocal is None:
+        raise RuntimeError("База данных не инициализирована. Вызовите init_db() сначала.")
+    
+    session = _SessionLocal()
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
 

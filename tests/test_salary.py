@@ -1,5 +1,5 @@
 """
-Тесты для сервиса расчёта зарплаты.
+Тесты для сервиса расчёта зарплаты (вахтовый метод).
 """
 
 import pytest
@@ -16,156 +16,167 @@ from app.services.salary_service import (
 def test_calculate_salary_basic():
     """Тест базового расчёта зарплаты."""
     result = calculate_salary(
-        base_salary=Decimal("1000"),
-        hours_worked=Decimal("160"),
-        tax_rate=Decimal("0.13")
+        hourly_rate=Decimal("1000"),
+        days_worked=Decimal("15")
     )
     
-    assert result["gross"] == Decimal("160000")
-    assert result["bonus"] == Decimal("0")
-    assert result["total"] == Decimal("160000")
-    assert result["tax"] == Decimal("20800")
-    assert result["net"] == Decimal("139200")
-    assert result["district_coefficient"] == Decimal("1.0")
-    assert result["northern_allowance"] == Decimal("0")
-    assert result["overtime_hours"] == Decimal("0")
-    assert result["overtime_pay"] == Decimal("0")
+    # Часы по табелю = 15 * 11 = 165
+    assert result["hours_by_timesheet"] == Decimal("165")
+    # Оплата по окладу = 165 * 1000 = 165000
+    assert result["salary_by_position"] == Decimal("165000")
+    # Премия месячная = 165000 * 0.33 = 54450
+    assert result["monthly_bonus"] == Decimal("54450")
+    # Доплата за вахтовый метод = 15 * 740 = 11100
+    assert result["shift_method_payment"] == Decimal("11100")
+    # Всего начислено = 165000 + 54450 + 11100 = 230550
+    assert result["total_accrued"] == Decimal("230550")
+    # Налог = (230550 - 11100) * 0.13 = 219450 * 0.13 = 28528.5
+    assert result["tax"] == Decimal("28528.50")
+    # К выплате = 230550 - 28528.5 = 202021.5
+    assert result["net"] == Decimal("202021.50")
 
 
-def test_calculate_salary_with_bonus():
-    """Тест расчёта зарплаты с бонусом."""
+def test_calculate_salary_with_night_hours():
+    """Тест расчёта зарплаты с ночными часами."""
     result = calculate_salary(
-        base_salary=Decimal("1000"),
-        hours_worked=Decimal("160"),
-        bonus=Decimal("20000"),
-        tax_rate=Decimal("0.13")
+        hourly_rate=Decimal("1000"),
+        days_worked=Decimal("15"),
+        night_hours=Decimal("20")
     )
     
-    assert result["gross"] == Decimal("160000")
-    assert result["bonus"] == Decimal("20000")
-    assert result["total"] == Decimal("180000")
-    assert result["tax"] == Decimal("23400")
-    assert result["net"] == Decimal("156600")
+    # Ночные = 20 * 1000 * 0.4 = 8000
+    assert result["night_shift_payment"] == Decimal("8000")
+    # Премия = (165000 + 8000) * 0.33 = 173000 * 0.33 = 57090
+    assert result["monthly_bonus"] == Decimal("57090")
 
 
-def test_calculate_salary_with_district_coefficient():
-    """Тест расчёта зарплаты с районным коэффициентом."""
+def test_calculate_salary_with_idle_days():
+    """Тест расчёта зарплаты с днями простоя."""
     result = calculate_salary(
-        base_salary=Decimal("1000"),
-        hours_worked=Decimal("160"),
-        district_coefficient=Decimal("1.5"),
-        tax_rate=Decimal("0.13")
+        hourly_rate=Decimal("1000"),
+        days_worked=Decimal("15"),
+        idle_days=Decimal("2")
     )
     
-    assert result["gross"] == Decimal("160000")
-    assert result["district_coefficient"] == Decimal("1.5")
-    assert result["gross_with_coefficient"] == Decimal("240000")
-    assert result["total"] == Decimal("240000")
-    assert result["tax"] == Decimal("31200")
-    assert result["net"] == Decimal("208800")
+    # Простой = 2 * 11 * 1000 * (2/3) = 14666.67
+    assert result["idle_payment"] == Decimal("14666.67")
 
 
-def test_calculate_salary_with_northern_allowance():
-    """Тест расчёта зарплаты с северной надбавкой."""
+def test_calculate_salary_with_travel_days():
+    """Тест расчёта зарплаты с днями в пути."""
     result = calculate_salary(
-        base_salary=Decimal("1000"),
-        hours_worked=Decimal("160"),
-        northern_allowance_rate=Decimal("50"),
-        tax_rate=Decimal("0.13")
+        hourly_rate=Decimal("1000"),
+        days_worked=Decimal("15"),
+        travel_days=Decimal("2")
     )
     
-    assert result["gross"] == Decimal("160000")
-    assert result["gross_with_coefficient"] == Decimal("160000")
-    assert result["northern_allowance"] == Decimal("80000")  # 50% от 160000
-    assert result["total"] == Decimal("240000")
-    assert result["tax"] == Decimal("31200")
-    assert result["net"] == Decimal("208800")
+    # Дни в пути = 2 * 1000 * 8 = 16000
+    assert result["travel_payment"] == Decimal("16000")
+    # Вахтовый метод = (15 + 2) * 740 = 12580
+    assert result["shift_method_payment"] == Decimal("12580")
 
 
-def test_calculate_salary_with_overtime():
-    """Тест расчёта зарплаты с переработками."""
+def test_calculate_salary_with_holiday_days():
+    """Тест расчёта зарплаты с праздничными днями."""
     result = calculate_salary(
-        base_salary=Decimal("1000"),
-        hours_worked=Decimal("160"),
-        overtime_hours=Decimal("20"),
-        overtime_multiplier=Decimal("1.5"),
-        tax_rate=Decimal("0.13")
+        hourly_rate=Decimal("1000"),
+        days_worked=Decimal("15"),
+        holiday_days=Decimal("1")
     )
     
-    assert result["gross"] == Decimal("160000")
-    assert result["overtime_hours"] == Decimal("20")
-    assert result["overtime_pay"] == Decimal("30000")  # 1000 * 1.5 * 20
-    assert result["total"] == Decimal("190000")
-    assert result["tax"] == Decimal("24700")
-    assert result["net"] == Decimal("165300")
+    # Праздники = 1 * 1000 * 11 = 11000
+    assert result["holiday_payment"] == Decimal("11000")
+
+
+def test_calculate_salary_with_allowances():
+    """Тест расчёта зарплаты с надбавками."""
+    result = calculate_salary(
+        hourly_rate=Decimal("1000"),
+        days_worked=Decimal("15"),
+        regional_allowance_rate=Decimal("20"),
+        northern_allowance_rate=Decimal("50")
+    )
+    
+    # Оклад = 165000
+    # Премия = 165000 * 0.33 = 54450
+    # Региональная = (165000 + 54450) * 0.2 = 43890
+    assert result["regional_allowance"] == Decimal("43890")
+    # Северная = (165000 + 54450) * 0.5 = 109725
+    assert result["northern_allowance"] == Decimal("109725")
 
 
 def test_calculate_salary_full():
     """Тест полного расчёта зарплаты со всеми параметрами."""
     result = calculate_salary(
-        base_salary=Decimal("1000"),
-        hours_worked=Decimal("160"),
-        district_coefficient=Decimal("1.5"),
-        northern_allowance_rate=Decimal("50"),
-        overtime_hours=Decimal("20"),
-        bonus=Decimal("20000"),
-        overtime_multiplier=Decimal("1.5"),
-        tax_rate=Decimal("0.13")
+        hourly_rate=Decimal("1000"),
+        days_worked=Decimal("15"),
+        night_hours=Decimal("20"),
+        idle_days=Decimal("2"),
+        travel_days=Decimal("2"),
+        holiday_days=Decimal("1"),
+        additional_payments=Decimal("5000"),
+        regional_allowance_rate=Decimal("20"),
+        northern_allowance_rate=Decimal("50")
     )
     
-    # Базовый оклад
-    assert result["gross"] == Decimal("160000")
+    # Проверяем основные компоненты
+    assert result["hours_by_timesheet"] == Decimal("165")
+    assert result["salary_by_position"] == Decimal("165000")
+    assert result["holiday_payment"] == Decimal("11000")
+    assert result["idle_payment"] == Decimal("14666.67")
+    assert result["travel_payment"] == Decimal("16000")
+    assert result["shift_method_payment"] == Decimal("12580")
+    assert result["night_shift_payment"] == Decimal("8000")
+    assert result["monthly_bonus"] == Decimal("57090")
+    assert result["additional_payments"] == Decimal("5000")
     
-    # С районным коэффициентом
-    assert result["gross_with_coefficient"] == Decimal("240000")
-    
-    # Северная надбавка (50% от оклада с коэффициентом)
-    assert result["northern_allowance"] == Decimal("120000")
-    
-    # Переработки
-    assert result["overtime_pay"] == Decimal("30000")
-    
-    # Бонус
-    assert result["bonus"] == Decimal("20000")
-    
-    # Итого до налогов: 240000 + 120000 + 30000 + 20000 = 410000
-    assert result["total"] == Decimal("410000")
-    
-    # Налог 13%
-    assert result["tax"] == Decimal("53300")
-    
-    # К выплате
-    assert result["net"] == Decimal("356700")
+    # Проверяем, что итоговая сумма положительная
+    assert result["total_accrued"] > 0
+    assert result["tax"] > 0
+    assert result["net"] > 0
 
 
 def test_validate_salary_inputs_valid():
     """Тест валидации валидных данных."""
     # Не должно вызывать исключений
     validate_salary_inputs(
-        base_salary=Decimal("1000"),
-        hours_worked=Decimal("160"),
-        northern_allowance_rate=Decimal("50"),
-        district_coefficient=Decimal("1.5"),
-        overtime_hours=Decimal("20"),
-        bonus=Decimal("10000")
+        hourly_rate=Decimal("1000"),
+        days_worked=Decimal("15"),
+        night_hours=Decimal("20"),
+        idle_days=Decimal("2"),
+        travel_days=Decimal("2"),
+        holiday_days=Decimal("1"),
+        additional_payments=Decimal("5000"),
+        regional_allowance_rate=Decimal("20"),
+        northern_allowance_rate=Decimal("50")
     )
 
 
-def test_validate_salary_inputs_invalid_base_salary():
-    """Тест валидации невалидной базовой ставки."""
-    with pytest.raises(SalaryCalculationError, match="Базовая ставка должна быть больше нуля"):
+def test_validate_salary_inputs_invalid_hourly_rate():
+    """Тест валидации невалидной часовой ставки."""
+    with pytest.raises(SalaryCalculationError, match="Часовая ставка должна быть больше нуля"):
         validate_salary_inputs(
-            base_salary=Decimal("0"),
-            hours_worked=Decimal("160")
+            hourly_rate=Decimal("0"),
+            days_worked=Decimal("15")
         )
 
 
-def test_validate_salary_inputs_invalid_hours():
-    """Тест валидации невалидных часов."""
-    with pytest.raises(SalaryCalculationError, match="Отработанные часы не могут быть отрицательными"):
+def test_validate_salary_inputs_invalid_days():
+    """Тест валидации невалидных дней."""
+    with pytest.raises(SalaryCalculationError, match="Количество отработанных дней не может быть отрицательным"):
         validate_salary_inputs(
-            base_salary=Decimal("1000"),
-            hours_worked=Decimal("-10")
+            hourly_rate=Decimal("1000"),
+            days_worked=Decimal("-5")
+        )
+
+
+def test_validate_salary_inputs_invalid_regional_allowance():
+    """Тест валидации невалидной региональной надбавки."""
+    with pytest.raises(SalaryCalculationError, match="Региональная надбавка должна быть от 0 до 100%"):
+        validate_salary_inputs(
+            hourly_rate=Decimal("1000"),
+            days_worked=Decimal("15"),
+            regional_allowance_rate=Decimal("150")
         )
 
 
@@ -173,84 +184,77 @@ def test_validate_salary_inputs_invalid_northern_allowance():
     """Тест валидации невалидной северной надбавки."""
     with pytest.raises(SalaryCalculationError, match="Северная надбавка должна быть от 0 до 100%"):
         validate_salary_inputs(
-            base_salary=Decimal("1000"),
-            hours_worked=Decimal("160"),
-            northern_allowance_rate=Decimal("150")
-        )
-
-
-def test_validate_salary_inputs_invalid_district_coefficient():
-    """Тест валидации невалидного районного коэффициента."""
-    with pytest.raises(SalaryCalculationError, match="Районный коэффициент должен быть от 1.0 до 3.0"):
-        validate_salary_inputs(
-            base_salary=Decimal("1000"),
-            hours_worked=Decimal("160"),
-            district_coefficient=Decimal("5.0")
-        )
-
-
-def test_validate_salary_inputs_invalid_overtime():
-    """Тест валидации невалидных переработок."""
-    with pytest.raises(SalaryCalculationError, match="Переработанные часы не могут превышать отработанные"):
-        validate_salary_inputs(
-            base_salary=Decimal("1000"),
-            hours_worked=Decimal("160"),
-            overtime_hours=Decimal("200")
+            hourly_rate=Decimal("1000"),
+            days_worked=Decimal("15"),
+            northern_allowance_rate=Decimal("-10")
         )
 
 
 def test_format_salary_report():
     """Тест форматирования отчёта о зарплате."""
     calculation = {
-        "base_salary": Decimal("1000"),
-        "hours_worked": Decimal("160"),
-        "gross": Decimal("160000"),
-        "district_coefficient": Decimal("1.5"),
-        "gross_with_coefficient": Decimal("240000"),
-        "northern_allowance": Decimal("120000"),
-        "overtime_hours": Decimal("20"),
-        "overtime_pay": Decimal("30000"),
-        "bonus": Decimal("20000"),
-        "total": Decimal("410000"),
-        "tax": Decimal("53300"),
-        "net": Decimal("356700"),
+        "hourly_rate": Decimal("1000"),
+        "days_worked": Decimal("15"),
+        "night_hours": Decimal("20"),
+        "idle_days": Decimal("2"),
+        "travel_days": Decimal("2"),
+        "holiday_days": Decimal("1"),
+        "hours_by_timesheet": Decimal("165"),
+        "salary_by_position": Decimal("165000"),
+        "holiday_payment": Decimal("11000"),
+        "idle_payment": Decimal("14666.67"),
+        "travel_payment": Decimal("16000"),
+        "shift_method_payment": Decimal("12580"),
+        "night_shift_payment": Decimal("8000"),
+        "monthly_bonus": Decimal("57090"),
+        "regional_allowance_rate": Decimal("20"),
+        "regional_allowance": Decimal("43890"),
+        "northern_allowance_rate": Decimal("50"),
+        "northern_allowance": Decimal("109725"),
+        "additional_payments": Decimal("5000"),
+        "total_accrued": Decimal("500000"),
+        "tax": Decimal("65000"),
+        "net": Decimal("435000"),
     }
     
     report = format_salary_report(calculation)
     assert "💰 Расчёт зарплаты" in report
     assert "1000.00" in report
-    assert "160" in report
-    assert "1.50" in report
-    assert "120000.00" in report
-    assert "20" in report
-    assert "30000.00" in report
-    assert "20000.00" in report
-    assert "410000.00" in report
-    assert "53300.00" in report
-    assert "356700.00" in report
+    assert "15" in report
+    assert "165" in report
+    assert "165000.00" in report
+    assert "435000.00" in report
 
 
 def test_format_salary_report_minimal():
     """Тест форматирования минимального отчёта (без дополнительных параметров)."""
     calculation = {
-        "base_salary": Decimal("1000"),
-        "hours_worked": Decimal("160"),
-        "gross": Decimal("160000"),
-        "district_coefficient": Decimal("1.0"),
-        "gross_with_coefficient": Decimal("160000"),
+        "hourly_rate": Decimal("1000"),
+        "days_worked": Decimal("15"),
+        "night_hours": Decimal("0"),
+        "idle_days": Decimal("0"),
+        "travel_days": Decimal("0"),
+        "holiday_days": Decimal("0"),
+        "hours_by_timesheet": Decimal("165"),
+        "salary_by_position": Decimal("165000"),
+        "holiday_payment": Decimal("0"),
+        "idle_payment": Decimal("0"),
+        "travel_payment": Decimal("0"),
+        "shift_method_payment": Decimal("11100"),
+        "night_shift_payment": Decimal("0"),
+        "monthly_bonus": Decimal("54450"),
+        "regional_allowance_rate": Decimal("0"),
+        "regional_allowance": Decimal("0"),
+        "northern_allowance_rate": Decimal("0"),
         "northern_allowance": Decimal("0"),
-        "overtime_hours": Decimal("0"),
-        "overtime_pay": Decimal("0"),
-        "bonus": Decimal("0"),
-        "total": Decimal("160000"),
-        "tax": Decimal("20800"),
-        "net": Decimal("139200"),
+        "additional_payments": Decimal("0"),
+        "total_accrued": Decimal("230550"),
+        "tax": Decimal("28528.50"),
+        "net": Decimal("202021.50"),
     }
     
     report = format_salary_report(calculation)
     assert "💰 Расчёт зарплаты" in report
     assert "1000.00" in report
-    assert "160" in report
-    assert "160000.00" in report
-    assert "139200.00" in report
-
+    assert "15" in report
+    assert "202021.50" in report

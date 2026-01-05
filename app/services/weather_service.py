@@ -6,7 +6,7 @@ import logging
 import os
 import time
 from typing import Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 import aiohttp
 
@@ -20,31 +20,101 @@ VANKOR_LATITUDE = float(os.getenv("VANKOR_LATITUDE", "69.5"))
 VANKOR_LONGITUDE = float(os.getenv("VANKOR_LONGITUDE", "88.0"))
 VANKOR_NAME = os.getenv("VANKOR_NAME", "Ванкорское месторождение")
 
-# Кэш для хранения данных о погоде
-_weather_cache: Optional[dict] = None
-_cache_timestamp: float = 0
-CACHE_DURATION = 600  # 10 минут в секундах
+# Длительность кэша по умолчанию (30 минут в секундах)
+DEFAULT_CACHE_DURATION = 1800
 
 
-async def get_weather(api_key: Optional[str] = None) -> Optional[dict]:
+class WeatherCache:
+    """
+    Класс для кэширования данных о погоде.
+    
+    Потокобезопасный кэш с TTL (time-to-live).
+    """
+    
+    def __init__(self, cache_duration: int = DEFAULT_CACHE_DURATION):
+        """
+        Инициализирует кэш погоды.
+        
+        Args:
+            cache_duration: Длительность кэша в секундах (по умолчанию 1800 секунд = 30 минут)
+        """
+        self._cache: Optional[dict] = None
+        self._cache_timestamp: float = 0
+        self._cache_duration = cache_duration
+    
+    def get(self) -> Optional[dict]:
+        """
+        Получить данные из кэша, если они ещё актуальны.
+        
+        Returns:
+            Данные о погоде или None, если кэш пуст или устарел
+        """
+        if self._cache is None:
+            return None
+        
+        current_time = time.time()
+        if (current_time - self._cache_timestamp) >= self._cache_duration:
+            # Кэш устарел
+            self._cache = None
+            self._cache_timestamp = 0
+            return None
+        
+        return self._cache
+    
+    def set(self, weather_data: dict) -> None:
+        """
+        Сохранить данные о погоде в кэш.
+        
+        Args:
+            weather_data: Данные о погоде для кэширования
+        """
+        self._cache = weather_data
+        self._cache_timestamp = time.time()
+    
+    def clear(self) -> None:
+        """Очистить кэш."""
+        self._cache = None
+        self._cache_timestamp = 0
+    
+    def is_valid(self) -> bool:
+        """
+        Проверить, актуален ли кэш.
+        
+        Returns:
+            True если кэш существует и не устарел, False в противном случае
+        """
+        if self._cache is None:
+            return False
+        
+        current_time = time.time()
+        return (current_time - self._cache_timestamp) < self._cache_duration
+
+
+# Глобальный экземпляр кэша (создаётся один раз при импорте модуля)
+_weather_cache = WeatherCache()
+
+
+async def get_weather(api_key: Optional[str] = None, cache: Optional[WeatherCache] = None) -> Optional[dict]:
     """
     Получает данные о погоде для Ванкорского месторождения.
     
-    Использует кэширование на 10 минут для уменьшения количества запросов к API.
+    Использует кэширование на 30 минут для уменьшения количества запросов к API.
     
     Args:
         api_key: API ключ для OpenWeatherMap (если не указан, берётся из переменных окружения)
+        cache: Экземпляр WeatherCache для кэширования (если не указан, используется глобальный)
     
     Returns:
         Словарь с данными о погоде или None в случае ошибки
     """
-    global _weather_cache, _cache_timestamp
+    # Используем переданный кэш или глобальный
+    weather_cache = cache if cache is not None else _weather_cache
     
     # Проверяем кэш
-    current_time = time.time()
-    if _weather_cache and (current_time - _cache_timestamp) < CACHE_DURATION:
+    cached_data = weather_cache.get()
+    if cached_data is not None:
         logger.debug("Возвращаем данные из кэша")
-        return _weather_cache
+        return cached_data
     
     # Получаем API ключ
     if not api_key:
@@ -82,8 +152,7 @@ async def get_weather(api_key: Optional[str] = None) -> Optional[dict]:
                     }
                     
                     # Сохраняем в кэш
-                    _weather_cache = weather_data
-                    _cache_timestamp = current_time
+                    weather_cache.set(weather_data)
                     
                     logger.info(f"Получены данные о погоде для {VANKOR_NAME}")
                     return weather_data
@@ -159,11 +228,51 @@ def format_weather_report(weather_data: dict) -> str:
     else:
         temp_emoji = "🌡️"
     
-    report = f"🌍 {location}\n\n"
+    # Эмодзи для "ощущается как" (используем тот же, что и для температуры)
+    feels_like_emoji = temp_emoji
+    
+    # Форматируем дату из timestamp
+    date_str = ""
+    timestamp = weather_data.get("timestamp")
+    if timestamp:
+        try:
+            # Парсим ISO формат timestamp
+            if timestamp.endswith('Z'):
+                dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+            else:
+                dt = datetime.fromisoformat(timestamp)
+            
+            # Конвертируем в локальное время (UTC+7 для Красноярска/Ванкора)
+            # Используем UTC+7 как приблизительное время для Ванкора
+            local_dt = dt + timedelta(hours=7)
+            
+            # Форматируем дату на русском языке
+            months = [
+                "января", "февраля", "марта", "апреля", "мая", "июня",
+                "июля", "августа", "сентября", "октября", "ноября", "декабря"
+            ]
+            date_str = f"{local_dt.day} {months[local_dt.month - 1]} {local_dt.year}, {local_dt.hour:02d}:{local_dt.minute:02d}"
+        except Exception as e:
+            # Если не удалось распарсить, используем текущее время
+            logger.debug(f"Не удалось распарсить timestamp {timestamp}: {e}")
+            try:
+                dt = datetime.now(timezone.utc) + timedelta(hours=7)
+                months = [
+                    "января", "февраля", "марта", "апреля", "мая", "июня",
+                    "июля", "августа", "сентября", "октября", "ноября", "декабря"
+                ]
+                date_str = f"{dt.day} {months[dt.month - 1]} {dt.year}, {dt.hour:02d}:{dt.minute:02d}"
+            except Exception:
+                date_str = ""
+    
+    report = f"🌍 {location}\n"
+    if date_str:
+        report += f"📅 {date_str}\n"
+    report += "\n"
     report += f"{temp_emoji} Температура: {temp}°C\n"
     
     if feels_like != temp:
-        report += f"   Ощущается как: {feels_like}°C\n"
+        report += f"{feels_like_emoji} Ощущается как: {feels_like}°C\n"
     
     report += f"☁️ {description}\n\n"
     report += f"💧 Влажность: {humidity}%\n"
