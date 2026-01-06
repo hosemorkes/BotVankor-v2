@@ -10,9 +10,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Копируем код приложения
 COPY app/ ./app/
-COPY data/ ./data/
 
-# Создаём директорию для данных
+# Создаём директорию для данных (будет монтироваться через volume)
 RUN mkdir -p data
 
 # Запускаем приложение
