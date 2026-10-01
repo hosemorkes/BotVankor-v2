@@ -72,42 +72,85 @@ if not httpx_logger.handlers:
 logger = logging.getLogger(__name__)
 
 
+async def initialize_bot_with_retry(token: str, max_retries: int = 5, retry_delay: int = 10) -> Application:
+    """
+    Инициализирует приложение бота с автоматическим retry.
+
+    Args:
+        token: Токен Telegram бота
+        max_retries: Максимальное количество попыток
+        retry_delay: Задержка между попытками (секунды)
+
+    Returns:
+        Инициализированное приложение Application
+
+    Raises:
+        RuntimeError: Если не удалось подключиться после всех попыток
+    """
+    for attempt in range(1, max_retries + 1):
+        try:
+            logger.info(f"Попытка подключения к Telegram API ({attempt}/{max_retries})...")
+
+            # Создание приложения с увеличенными таймаутами
+            application = (
+                Application.builder()
+                .token(token)
+                .read_timeout(30)
+                .write_timeout(30)
+                .connect_timeout(30)
+                .pool_timeout(30)
+                .build()
+            )
+
+            # Настройка обработчиков
+            setup_handlers(application)
+
+            # Инициализация (это проверяет токен и подключение)
+            await application.initialize()
+            logger.info("✅ Успешное подключение к Telegram API")
+
+            return application
+
+        except Exception as e:
+            logger.error(f"❌ Ошибка подключения (попытка {attempt}/{max_retries}): {e}")
+
+            if attempt < max_retries:
+                logger.info(f"⏳ Ожидание {retry_delay} секунд перед повтором...")
+                await asyncio.sleep(retry_delay)
+            else:
+                raise RuntimeError(
+                    f"Не удалось подключиться к Telegram API после {max_retries} попыток. "
+                    f"Проверьте:\n"
+                    f"1. Корректность TELEGRAM_BOT_TOKEN в .env\n"
+                    f"2. Доступность сервера (файрвол, DNS)\n"
+                    f"3. Подключение к интернету"
+                ) from e
+
+
 async def main_async() -> None:
     """Асинхронная функция запуска бота."""
     # Инициализация базы данных
     db_path = Path("data/bot.db")
     db_path.parent.mkdir(parents=True, exist_ok=True)
     init_db(str(db_path))
-    
+
     # Получение токена из переменных окружения
-    import os
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
         raise ValueError("TELEGRAM_BOT_TOKEN не установлен в переменных окружения")
-    
-    # Создание приложения с увеличенными таймаутами
-    application = (
-        Application.builder()
-        .token(token)
-        .read_timeout(30)  # Увеличиваем таймаут чтения до 30 секунд
-        .write_timeout(30)  # Увеличиваем таймаут записи до 30 секунд
-        .connect_timeout(30)  # Увеличиваем таймаут подключения до 30 секунд
-        .pool_timeout(30)  # Увеличиваем таймаут пула до 30 секунд
-        .build()
-    )
-    
-    # Настройка обработчиков
-    setup_handlers(application)
-    
+
+    # Инициализация приложения с retry логикой
+    application = await initialize_bot_with_retry(token)
+
     # Запуск бота через контекстный менеджер
     async with application:
-        logger.info("Бот запущен")
+        logger.info("🚀 Бот запущен и готов к работе")
         await application.start()
         await application.updater.start_polling(
             allowed_updates=["message", "callback_query"],
             drop_pending_updates=True
         )
-        
+
         # Ожидание остановки (бесконечный цикл до KeyboardInterrupt)
         try:
             while True:
