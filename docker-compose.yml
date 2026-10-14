@@ -8,15 +8,13 @@ services:
     command:
       - sslocal
       - -s
-      - ${SS_SERVER}
-      - -p
-      - "${SS_PORT}"
+      - "${SS_SERVER}:${SS_PORT}"
       - -k
-      - ${SS_PASSWORD}
+      - "${SS_PASSWORD}"
       - -m
-      - ${SS_METHOD}
+      - "${SS_METHOD}"
       - -b
-      - 0.0.0.0:1080
+      - "0.0.0.0:1080"
       - --protocol
       - socks
     environment:
