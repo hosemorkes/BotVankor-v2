@@ -169,6 +169,122 @@ docker logs -f vankor_bot
 docker-compose down
 ```
 
+## 🌐 Прокси для Telegram API (Shadowsocks)
+
+### Зачем это нужно?
+
+Если бот работает на сервере в России или другой стране с блокировкой Telegram API, трафик нужно пропустить через прокси за пределами блокирующей юрисдикции.
+
+**Архитектура:**
+```
+контейнер bot → контейнер sslocal (SOCKS5) → зарубежный ssserver → api.telegram.org
+```
+
+### Настройка
+
+#### 1. Зарубежный VPS с Shadowsocks Server
+
+Убедитесь, что на зарубежном VPS уже установлен и работает `ssserver`:
+
+```bash
+# На VPS с ssserver
+ssserver -s 0.0.0.0 -p 8388 -k your_password -m 2022-blake3-aes-256-gcm
+```
+
+Сохраните:
+- **IP адрес VPS** (например, `203.0.113.42`)
+- **Порт** (например, `8388`)
+- **Пароль** (в base64 для методов 2022-*)
+- **Метод шифрования** (например, `2022-blake3-aes-256-gcm`)
+
+#### 2. Настройка .env на сервере в России
+
+Скопируйте `.env.example` в `.env` и заполните переменные Shadowsocks:
+
+```bash
+# Shadowsocks proxy configuration
+SS_SERVER=203.0.113.42                          # IP вашего зарубежного VPS
+SS_PORT=8388                                     # Порт ssserver
+SS_PASSWORD=your_password_base64                 # Пароль в base64
+SS_METHOD=2022-blake3-aes-256-gcm               # Метод шифрования
+
+PROXY_URL=socks5://sslocal:1080                 # URL прокси для бота
+```
+
+#### 3. Запуск с прокси
+
+```bash
+# Сборка и запуск с прокси
+docker-compose build
+docker-compose up -d
+```
+
+Docker Compose автоматически:
+- Запустит контейнер `sslocal` с параметрами из переменных окружения
+- Запустит контейнер `bot` с зависимостью от `sslocal`
+- Пробросит трафик бота через SOCKS5 прокси
+
+### Проверка работы прокси
+
+#### 1. Проверка логов sslocal
+
+```bash
+docker-compose logs sslocal
+```
+
+Вы должны увидеть:
+```
+[INFO] listening on 0.0.0.0:1080
+```
+
+#### 2. Проверка логов бота
+
+```bash
+docker-compose logs bot
+```
+
+Вы должны увидеть:
+```
+✓ Прокси включен: socks5://***
+✅ Успешное подключение к Telegram API
+```
+
+#### 3. Тест прокси внутри контейнера бота
+
+```bash
+docker-compose exec bot python -c "
+import httpx
+async def test():
+    async with httpx.AsyncClient(proxy='socks5://sslocal:1080') as client:
+        resp = await client.get('https://api.telegram.org/botXXX/getMe')
+        print('Статус:', resp.status_code)
+        print('Ответ:', resp.json())
+import asyncio
+asyncio.run(test())
+"
+```
+
+### Отключение прокси
+
+Если прокси больше не нужен:
+
+```bash
+# Удалите переменную PROXY_URL из .env
+# PROXY_URL=socks5://sslocal:1080  # закомментируйте или удалите
+
+# Перезапустите контейнер
+docker-compose down
+docker-compose up -d
+```
+
+### Замечания безопасности
+
+- ❌ **Не коммитьте** реальные значения `SS_PASSWORD` и IP адреса VPS в Git
+- ✅ **Используйте** `.env` для хранения секретов
+- ✅ **Убедитесь**, что `.env` есть в `.gitignore`
+- ✅ Пароль должен быть **в base64** для методов `2022-*`
+- ✅ Порт 1080 **не публикуется** наружу (только внутренняя сеть Docker)
+
 ### 🚀 Развертывание на Linux сервере
 
 #### Предварительные требования
@@ -391,10 +507,11 @@ pytest tests/test_weather.py -v
 ```
 
 ### Результаты тестирования:
-- ✅ 9 тестов базы данных
-- ✅ 3 теста расчёта зарплаты
-- ✅ 9 тестов погоды
-- **Всего: 21 тест (все проходят)**
+- ✅ 7 рабочих тестов базы данных
+- ✅ 11 тестов погоды
+- ✅ 4 теста конфигурации прокси
+- ✅ Тесты расчёта зарплаты
+- **Всего: 22+ тестов (основные проходят)**
 
 ## 📝 Разработка
 

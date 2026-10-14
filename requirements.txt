@@ -7,6 +7,9 @@ SQLAlchemy>=2.0.36
 # HTTP клиент для внешних API
 aiohttp>=3.10.0
 
+# HTTP клиент с поддержкой SOCKS5 для прокси
+httpx[socks]>=0.24.0
+
 # Environment variables
 python-dotenv==1.0.0
 

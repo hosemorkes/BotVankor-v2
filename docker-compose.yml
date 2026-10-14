@@ -1,6 +1,30 @@
 version: '3.8'
 
 services:
+  sslocal:
+    image: ghcr.io/shadowsocks/sslocal-rust:latest
+    container_name: sslocal
+    restart: unless-stopped
+    command:
+      - sslocal
+      - -s
+      - ${SS_SERVER}
+      - -p
+      - "${SS_PORT}"
+      - -k
+      - ${SS_PASSWORD}
+      - -m
+      - ${SS_METHOD}
+      - -b
+      - 0.0.0.0:1080
+      - --protocol
+      - socks
+    environment:
+      - RUST_LOG=info
+    # Порт 1080 не публикуется наружу (внутренняя сеть compose)
+    networks:
+      - vankor-network
+
   bot:
     build: .
     container_name: vankor_bot
@@ -12,4 +36,12 @@ services:
       - ./.env:/app/.env:ro
     environment:
       - PYTHONUNBUFFERED=1
+    depends_on:
+      - sslocal
+    networks:
+      - vankor-network
+
+networks:
+  vankor-network:
+    driver: bridge
 

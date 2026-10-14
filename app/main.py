@@ -72,12 +72,13 @@ if not httpx_logger.handlers:
 logger = logging.getLogger(__name__)
 
 
-async def initialize_bot_with_retry(token: str, max_retries: int = 5, retry_delay: int = 10) -> Application:
+async def initialize_bot_with_retry(token: str, proxy_url: str = None, max_retries: int = 5, retry_delay: int = 10) -> Application:
     """
     Инициализирует приложение бота с автоматическим retry.
 
     Args:
         token: Токен Telegram бота
+        proxy_url: URL прокси для подключения к Telegram API (опционально)
         max_retries: Максимальное количество попыток
         retry_delay: Задержка между попытками (секунды)
 
@@ -92,15 +93,21 @@ async def initialize_bot_with_retry(token: str, max_retries: int = 5, retry_dela
             logger.info(f"Попытка подключения к Telegram API ({attempt}/{max_retries})...")
 
             # Создание приложения с увеличенными таймаутами
-            application = (
+            builder = (
                 Application.builder()
                 .token(token)
                 .read_timeout(30)
                 .write_timeout(30)
                 .connect_timeout(30)
                 .pool_timeout(30)
-                .build()
             )
+
+            # Применение прокси, если указан
+            if proxy_url:
+                builder = builder.proxy(proxy_url).get_updates_proxy(proxy_url)
+                logger.info(f"✓ Прокси включен: {proxy_url.split('@')[0]}://***")
+
+            application = builder.build()
 
             # Настройка обработчиков
             setup_handlers(application)
@@ -139,8 +146,11 @@ async def main_async() -> None:
     if not token:
         raise ValueError("TELEGRAM_BOT_TOKEN не установлен в переменных окружения")
 
+    # Получение URL прокси (опционально)
+    proxy_url = os.getenv("PROXY_URL")
+
     # Инициализация приложения с retry логикой
-    application = await initialize_bot_with_retry(token)
+    application = await initialize_bot_with_retry(token, proxy_url=proxy_url)
 
     # Запуск бота через контекстный менеджер
     async with application:
